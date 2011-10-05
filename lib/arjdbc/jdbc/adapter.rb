@@ -209,11 +209,24 @@ module ActiveRecord
         end
       end
 
+      def execute_procedure(sql, name = nil, binds = [])
+        sql = substitute_binds(sql, binds)
+        if name == :skip_logging
+          _execute_procedure(sql)
+        else
+          log(sql, name) { _execute_procedure(sql) }
+        end
+      end
+
       # we need to do it this way, to allow Rails stupid tests to always work
       # even if we define a new execute method. Instead of mixing in a new
       # execute, an _execute should be mixed in.
       def _execute(sql, name = nil)
         @connection.execute(sql)
+      end
+
+      def _execute_procedure(sql, name = nil)
+        @connection.executeProcedure(sql)
       end
 
       def jdbc_insert(sql, name = nil, pk = nil, id_value = nil, sequence_name = nil, binds = [])

@@ -211,6 +211,54 @@ public class RubyJdbcConnection extends RubyObject {
         });
     }
 
+    @JRubyMethod
+    public IRubyObject executeProcedure(final ThreadContext context, final IRubyObject sql) {
+        return (IRubyObject) withConnectionAndRetry(context, new SQLBlock() {
+            public Object call(Connection c) throws SQLException {
+                Statement stmt = null;
+                String query = rubyApi.convertToRubyString(sql).getUnicodeValue();
+                try {
+                    stmt = c.createStatement();
+
+                    boolean runLoop = true;
+                    ResultSet rs = null;
+                    boolean gotResultSet = genericExecute(stmt, query);
+
+                    Ruby runtime = context.getRuntime();
+                    List<IRubyObject> sets = new ArrayList<IRubyObject>();
+
+                    while (runLoop) {
+                        if (gotResultSet) {
+                            rs = stmt.getResultSet();
+                        } else {
+                            rs = null;
+                            if (stmt.getUpdateCount() == -1)
+                                runLoop = false;
+                        }
+
+                        if (rs != null) {
+                            sets.add(unmarshalResult(context, c.getMetaData(), rs, false));
+                        }
+                        gotResultSet = stmt.getMoreResults();
+                    }
+
+                    if (sets.size() > 1) {
+                        return runtime.newArray(sets);
+                    } else {
+                        return sets.get(0);
+                    }
+                } catch (SQLException sqe) {
+                    if (context.getRuntime().isDebug()) {
+                        System.out.println("Error SQL: " + query);
+                    }
+                    throw sqe;
+                } finally {
+                    close(stmt);
+                }
+            }
+        });
+    }
+
     protected boolean genericExecute(Statement stmt, String query) throws SQLException {
         return stmt.execute(query);
     }
