@@ -20,3 +20,4 @@ patches*
 target
 /test/fscontext.jar
 /test/providerutil.jar
+.idea/*
