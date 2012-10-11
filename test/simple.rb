@@ -14,6 +14,7 @@ module MigrationSetup
     CreateAutoIds.up
     CreateValidatesUniquenessOf.up
     CreateThings.up
+    CreateCustomPkName.up
     @connection = ActiveRecord::Base.connection
   end
 
@@ -25,6 +26,7 @@ module MigrationSetup
     CreateAutoIds.down
     CreateValidatesUniquenessOf.down
     CreateThings.down
+    CreateCustomPkName.down
     ActiveRecord::Base.clear_active_connections!
   end
 end
@@ -43,8 +45,68 @@ module FixtureSetup
   end
 end
 
+module ColumnNameQuotingTests
+  def self.included(base)
+    base.class_eval do
+      @@column_quote_char = "\""
+
+      def self.column_quote_char(char)
+        @@column_quote_char = char
+      end
+    end
+  end
+
+  def test_column_names_are_escaped
+    conn = ActiveRecord::Base.connection
+    quoted = conn.quote_column_name "foo#{column_quote_char}bar"
+    assert_equal "#{column_quote_char}foo#{column_quote_char * 2}bar#{column_quote_char}", quoted
+  end
+
+  protected
+  def column_quote_char
+    @@column_quote_char || "\""
+  end
+end
+
+module DirtyAttributeTests
+  def test_partial_update
+    entry = Entry.new(:title => 'foo')
+    old_updated_on = 1.hour.ago.beginning_of_day
+
+    with_partial_updates Entry, false do
+      assert_queries(2) { 2.times { entry.save! } }
+      Entry.update_all({ :updated_on => old_updated_on }, :id => entry.id)
+    end
+
+    with_partial_updates Entry, true do
+      assert_queries(0) { 2.times { entry.save! } }
+      assert_equal old_updated_on, entry.reload.updated_on
+
+      assert_queries(1) { entry.title = 'bar'; entry.save! }
+      assert_not_equal old_updated_on, entry.reload.updated_on
+    end
+  end
+
+  private
+  def with_partial_updates(klass, on = true)
+    old = klass.partial_updates?
+    klass.partial_updates = on
+    yield
+  ensure
+    klass.partial_updates = old
+  end
+end
+
 module SimpleTestMethods
   include FixtureSetup
+
+  def test_substitute_binds_has_no_side_effect_on_binds_parameter
+    binds = [[Entry.columns_hash['title'], 'test1']]
+    binds2 = binds.dup
+    sql = 'select * from entries where title = ?'
+    Entry.connection.substitute_binds(sql, binds)
+    assert_equal binds2, binds
+  end
 
   def test_entries_created
     assert ActiveRecord::Base.connection.tables.find{|t| t =~ /^entries$/i}, "entries not created"
@@ -71,6 +133,18 @@ module SimpleTestMethods
       assert !value.nil?
       entry = Entry.find_by_title('insert_title')
       assert_equal entry.id, value
+
+      # Ensure we get the id even if the PK column is not named 'id'
+      1.upto(4) do |i|
+        cpn_name = "return id test#{i}"
+        cpn = CustomPkName.new
+        cpn.name = cpn_name
+        cpn.save
+        value = cpn.custom_id
+        assert !value.nil?
+        cpn = CustomPkName.find_by_name(cpn_name)
+        assert_equal cpn.custom_id, value
+      end
     end
   end
 
@@ -228,11 +302,11 @@ module SimpleTestMethods
     # so they all have a initial value of an empty string ''
     assert_equal(nil, e.sample_text) unless ActiveRecord::Base.connection.adapter_name =~ /oracle/i
 
-    e.sample_text = "ooop"
+    e.sample_text = "ooop?"
     e.save!
 
     e = DbType.find(:first)
-    assert_equal("ooop", e.sample_text)
+    assert_equal("ooop?", e.sample_text)
   end
 
   def test_string
@@ -240,11 +314,11 @@ module SimpleTestMethods
 
     # An empty string is treated as a null value in Oracle: http://www.techonthenet.com/oracle/questions/empty_null.php
     assert_equal('', e.sample_string) unless ActiveRecord::Base.connection.adapter_name =~ /oracle/i
-    e.sample_string = "ooop"
+    e.sample_string = "ooop?"
     e.save!
 
     e = DbType.find(:first)
-    assert_equal("ooop", e.sample_string)
+    assert_equal("ooop?", e.sample_string)
   end
 
   def test_save_binary
@@ -264,7 +338,7 @@ module SimpleTestMethods
     db_type = DbType.find(db_type.id)
     assert_equal BigDecimal.new(expected.to_s), db_type.sample_small_decimal
   end
-  
+
   def test_decimal_with_scale
     test_value = 7.3
     db_type = DbType.new(:sample_small_decimal => test_value)
@@ -358,9 +432,9 @@ module SimpleTestMethods
 
     class Animal < ActiveRecord::Base; end
 
-    # ENEBO: Is this really ar-jdbc-specific or a bug in our adapter?
     def test_fetching_columns_for_nonexistent_table_should_raise
-      assert_raises(ActiveRecord::JDBCError) do
+      assert_raises(ActiveRecord::ActiveRecordError,
+                    ActiveRecord::StatementInvalid, ActiveRecord::JDBCError) do
         Animal.columns
       end
     end
@@ -484,13 +558,6 @@ module SimpleTestMethods
     f = StringId.first #reload is essential
     assert_equal "some_string", f.id
   end
-
-  def test_model_with_no_id
-    assert_nothing_raised do
-      Thing.create! :name => "a thing"
-    end
-    assert_equal 1, Thing.find(:all).size
-  end
 end
 
 module MultibyteTestMethods
@@ -577,9 +644,88 @@ module ActiveRecord3TestMethods
   end
 
   module Tests
+    if ActiveRecord::VERSION::MINOR == 2
+      def test_visitor_accessor
+        adapter = Entry.connection
+        expected_visitors = adapter.config[:adapter_spec].
+          arel2_visitors(adapter).values
+        assert !adapter.visitor.nil?
+        assert expected_visitors.include?(adapter.visitor.class)
+      end
+    end
+
     def test_where
       entries = Entry.where(:title => @entry.title)
       assert_equal @entry, entries.first
     end
+
+    def test_remove_nonexistent_index
+      assert_raise(ArgumentError, ActiveRecord::StatementInvalid, ActiveRecord::JDBCError) do
+        @connection.remove_index :entries, :nonexistent_index
+      end
+    end
+
+    def test_add_index_with_invalid_name_length
+      index_name = 'x' * (@connection.index_name_length + 1)
+      assert_raise(ArgumentError) do
+        @connection.add_index "entries", "title", :name => index_name
+      end
+    end
+
+    def test_model_with_no_id
+      assert_nothing_raised do
+        Thing.create! :name => "a thing"
+      end
+      assert_equal 1, Thing.find(:all).size
+    end
   end
+end
+
+module ResetColumnInformationTestMethods
+  class Fhqwhgad < ActiveRecord::Base
+  end
+
+  def test_reset_column_information
+    drop_fhqwhgads_table!
+    create_fhqwhgads_table_1!
+    Fhqwhgad.reset_column_information
+    assert_equal ["id", "come_on"].sort, Fhqwhgad.columns.map{|c| c.name}.sort, "columns should be correct the first time"
+
+    drop_fhqwhgads_table!
+    create_fhqwhgads_table_2!
+    Fhqwhgad.reset_column_information
+    assert_equal ["id", "to_the_limit"].sort, Fhqwhgad.columns.map{|c| c.name}.sort, "columns should be correct the second time"
+  ensure
+    drop_fhqwhgads_table!
+  end
+
+  private
+
+    def drop_fhqwhgads_table!
+      ActiveRecord::Schema.define do
+        suppress_messages do
+          drop_table :fhqwhgads if table_exists? :fhqwhgads
+        end
+      end
+    end
+
+    def create_fhqwhgads_table_1!
+      ActiveRecord::Schema.define do
+        suppress_messages do
+          create_table :fhqwhgads do |t|
+            t.string :come_on
+          end
+        end
+      end
+    end
+
+    def create_fhqwhgads_table_2!
+      ActiveRecord::Schema.define do
+        suppress_messages do
+          create_table :fhqwhgads do |t|
+            t.string :to_the_limit, :null=>false, :default=>'everybody'
+          end
+        end
+      end
+    end
 end

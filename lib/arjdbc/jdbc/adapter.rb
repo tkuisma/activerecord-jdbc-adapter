@@ -12,6 +12,7 @@ require 'arjdbc/jdbc/column'
 require 'arjdbc/jdbc/connection'
 require 'arjdbc/jdbc/callbacks'
 require 'arjdbc/jdbc/extension'
+require 'arjdbc/jdbc/base_ext'
 require 'bigdecimal'
 
 module ActiveRecord
@@ -111,7 +112,7 @@ module ActiveRecord
         if defined?(::Arel::Visitors::VISITORS)
           visitors = ::Arel::Visitors::VISITORS
           visitor = nil
-          adapter_spec = config[:adapter_spec] || self
+          adapter_spec = [config[:adapter_spec], self.class].detect {|a| a && a.respond_to?(:arel2_visitors) }
           adapter_spec.arel2_visitors(config).each do |k,v|
             visitor = v
             visitors[k] = v
@@ -119,6 +120,7 @@ module ActiveRecord
           if visitor && config[:adapter] =~ /^(jdbc|jndi)$/
             visitors[config[:adapter]] = visitor
           end
+          @visitor = visitors[config[:adapter]].new(self)
         end
       end
 
@@ -196,7 +198,8 @@ module ActiveRecord
         if binds.empty?
           sql
         else
-          sql.gsub('?') { quote(*binds.shift.reverse) }
+          copy = binds.dup
+          sql.gsub('?') { quote(*copy.shift.reverse) }
         end
       end
 

@@ -11,8 +11,8 @@ MySQL, PostgreSQL, SQLite3, Oracle, Microsoft SQL Server, DB2,
 FireBird, Derby, HSQLDB, H2, and Informix.
 
 Other databases will require testing and likely a custom configuration module.
-Please join the JRuby mailing-list[http://jruby.org/community] to help us discover
-support for more databases.
+Please join the JRuby {mailing list}[http://jruby.org/community] to help us
+discover support for more databases.
 
 == Using ActiveRecord JDBC
 
@@ -23,14 +23,18 @@ To use activerecord-jdbc-adapter with JRuby on Rails:
 1. Choose the adapter you wish to gem install. The following pre-packaged
 adapters are available:
 
-  * base jdbc (<tt>activerecord-jdbc-adapter</tt>). Supports all available databases via JDBC, but requires you to download and manually install the database vendor's JDBC driver .jar file.
-  * mysql (<tt>activerecord-jdbcmysql-adapter</tt>)
-  * postgresql (<tt>activerecord-jdbcpostgresql-adapter</tt>)
-  * sqlite3 (<tt>activerecord-jdbcsqlite3-adapter</tt>)
-  * derby (<tt>activerecord-jdbcderby-adapter</tt>)
-  * hsqldb (<tt>activerecord-jdbchsqldb-adapter</tt>)
-  * h2 (<tt>activerecord-jdbch2-adapter</tt>)
-  * mssql (<tt>activerecord-jdbcmssql-adapter</tt>)
+- base jdbc (activerecord-jdbc-adapter). Supports all available databases via
+  JDBC, but requires you to download and manually install the database vendor's
+  JDBC driver .jar file.
+- mysql (activerecord-jdbcmysql-adapter)
+- postgresql (activerecord-jdbcpostgresql-adapter)
+- sqlite3 (activerecord-jdbcsqlite3-adapter)
+- derby (activerecord-jdbcderby-adapter)
+- hsqldb (activerecord-jdbchsqldb-adapter)
+- h2 (activerecord-jdbch2-adapter)
+- mssql (activerecord-jdbcmssql-adapter). Does not support SQL Azure by default,
+  see the {project's readme}[https://github.com/jruby/activerecord-jdbc-adapter/blob/master/activerecord-jdbcmssql-adapter/README.rdoc]
+  for more information.
 
 2a. For Rails 3, if you're generating a new application, use the
 following command to generate your application:
@@ -67,7 +71,7 @@ prefix in front of the database adapter name as below.
       adapter: jdbcmysql
       username: blog
       password:
-      hostname: localhost
+      host: localhost
       database: weblog_development
 
 For other databases, you'll need to know the database driver class and
@@ -167,12 +171,23 @@ alse need to grant "blog" create privileges on
 If you also have PostgreSQL available, those tests will be run if the
 `psql' executable can be found. Also ensure you have a database named
 <tt>weblog_development</tt> and a user named "blog" and an empty
-password.
+password.  You can control the host and port the tests will attempt to
+by setting the environment variables PGHOST and PGPORT.
 
 If you want rails logging enabled during these test runs you can edit 
 test/jdbc_common.rb and add the following line:
 
 require 'db/logger'
+
+To execute a single test case, you can run:
+
+  rake appraisal:{version} test_{db} TEST=test/{tests file}
+
+Substitute the version of ActiveRecord for version, which can be one of: 
+  rails23, rails30, rails31, or rails32
+The db can be one of these: 
+  mssql, mysql, oracle, postgres, sybase, sqlite3, db2, derby, h2 
+Finally, the tests file will be whichever test case you want to run.
 
 == Running AR Tests
 
@@ -182,6 +197,8 @@ the ActiveRecord sources.
 
   jruby -S rake rails:test DRIVER=mysql RAILS=/path/activerecord_source_dir
 
+== Travis Build Status {<img src="https://secure.travis-ci.org/jruby/activerecord-jdbc-adapter.png"/>}[http://travis-ci.org/#!/jruby/activerecord-jdbc-adapter]
+
 == Authors
 
 This project was written by Nick Sieger <nick@nicksieger.com> and Ola Bini
@@ -189,8 +206,8 @@ This project was written by Nick Sieger <nick@nicksieger.com> and Ola Bini
 
 == License
 
-activerecord-jdbc-adapter is released under a BSD license. See the LICENSE file
-included with the distribution for details.
+activerecord-jdbc-adapter is released under a BSD license. See the LICENSE.txt
+file included with the distribution for details.
 
 Open-source driver gems for activerecord-jdbc-adapter are licensed under the
 same license the database's drivers are licensed. See each driver gem's

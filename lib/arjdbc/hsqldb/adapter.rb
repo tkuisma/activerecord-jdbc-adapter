@@ -70,7 +70,7 @@ module ::ArJdbc
         if respond_to?(:h2_adapter) && value.empty?
           "''"
         elsif column && column.type == :binary
-          "'#{value.unpack("H*")}'"
+          "X'#{value.unpack("H*")[0]}'"
         elsif column && (column.type == :integer ||
                          column.respond_to?(:primary) && column.primary && column.klass != String)
           value.to_i.to_s
@@ -133,7 +133,8 @@ module ::ArJdbc
     end
 
     def last_insert_id
-      Integer(select_value("CALL IDENTITY()"))
+      identity = select_value("CALL IDENTITY()")
+      Integer(identity.nil? ? 0 : identity)
     end
 
     def _execute(sql, name = nil)

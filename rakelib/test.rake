@@ -1,9 +1,7 @@
 require File.expand_path('../../test/helper', __FILE__)
 if defined?(JRUBY_VERSION)
   databases = [:test_mysql, :test_jdbc, :test_sqlite3, :test_derby, :test_hsqldb, :test_h2]
-  if find_executable?("psql") && `psql -c '\\l'` && $?.exitstatus == 0
-    databases << :test_postgres
-  end
+  databases << :test_postgres if have_postgres?
   if File.exist?('test/fscontext.jar')
     databases << :test_jndi
   end
@@ -13,15 +11,29 @@ else
 end
 
 def set_compat_version(task)
-  task.ruby_opts << '-v'
+  task.ruby_opts << '-v' if RUBY_VERSION =~ /1\.8/
   if defined?(JRUBY_VERSION)
     task.ruby_opts << "--#{RUBY_VERSION[/^(\d+\.\d+)/, 1]}"
   end
 end
 
+def all_appraisal_names
+  @names ||= begin
+               names = []
+               Appraisal::File.each {|a| names << a.name }
+               names
+             end
+end
+
 def declare_test_task_for(adapter, options = {})
   driver = options[:driver] || adapter
-  Rake::TestTask.new("test_#{adapter}") do |t|
+  prereqs = options[:prereqs] || []
+  prereqs = [prereqs].flatten
+  task "test_#{adapter}_pre" do
+    puts "Specify AR version with 'rake appraisal:{version} test_#{adapter}' where version=(#{all_appraisal_names.join('|')})"
+  end
+  prereqs << "test_#{adapter}_pre"
+  Rake::TestTask.new("test_#{adapter}" => prereqs) do |t|
     files = FileList["test/#{adapter}*test.rb"]
     if adapter == "derby"
       files << 'test/activerecord/connection_adapters/type_conversion_test.rb'
@@ -43,8 +55,8 @@ declare_test_task_for :derby
 declare_test_task_for :h2
 declare_test_task_for :hsqldb
 declare_test_task_for :mssql, :driver => :jtds
-declare_test_task_for :mysql
-declare_test_task_for :postgres
+declare_test_task_for :mysql, :prereqs => "db:mysql"
+declare_test_task_for :postgres, :prereqs => "db:postgres"
 declare_test_task_for :sqlite3
 
 Rake::TestTask.new(:test_jdbc) do |t|

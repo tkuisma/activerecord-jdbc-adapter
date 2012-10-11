@@ -77,6 +77,7 @@ import org.jruby.util.ByteList;
  */
 public class RubyJdbcConnection extends RubyObject {
     private static final String[] TABLE_TYPE = new String[]{"TABLE"};
+    private static final String[] TABLE_TYPES = new String[]{"TABLE", "VIEW", "SYNONYM"};
 
     private static RubyObjectAdapter rubyApi;
 
@@ -104,6 +105,10 @@ public class RubyJdbcConnection extends RubyObject {
         return (RubyModule) runtime.getModule("ActiveRecord").getConstant("ConnectionAdapters");
     }
 
+    protected String[] getTableTypes() {
+        return TABLE_TYPES;
+    }
+
     @JRubyMethod(name = "begin")
     public IRubyObject begin(ThreadContext context) throws SQLException {
         final Ruby runtime = context.getRuntime();
@@ -126,9 +131,8 @@ public class RubyJdbcConnection extends RubyObject {
                     String tableName = rubyApi.convertToRubyString(args[0]).getUnicodeValue();
                     TableNameComponents components = extractTableNameComponents(c, defaultSchema, tableName);
 
-                    String[] tableTypes = new String[]{"TABLE","VIEW","SYNONYM"};
                     RubyArray matchingTables = (RubyArray) tableLookupBlock(context.getRuntime(),
-                            components.catalog, components.schema, components.table, tableTypes, false).call(c);
+                            components.catalog, components.schema, components.table, getTableTypes(), false).call(c);
                     if (matchingTables.isEmpty()) {
                         throw new SQLException("Table " + tableName + " does not exist");
                     }
@@ -555,7 +559,7 @@ public class RubyJdbcConnection extends RubyObject {
     public static IRubyObject select_p(ThreadContext context, IRubyObject recv, IRubyObject _sql) {
         ByteList sql = rubyApi.convertToRubyString(_sql).getByteList();
 
-        return context.getRuntime().newBoolean(startsWithNoCaseCmp(sql, SELECT) ||
+        return context.getRuntime().newBoolean(startsWithNoCaseCmp(sql, SELECT) || startsWithNoCaseCmp(sql, WITH) ||
                 startsWithNoCaseCmp(sql, SHOW) || startsWithNoCaseCmp(sql, CALL));
     }
 
@@ -1018,11 +1022,13 @@ public class RubyJdbcConnection extends RubyObject {
         return RubyString.newUnicodeString(runtime, string);
     }
 
-    private static final int TABLE_NAME = 3;
 
     protected SQLBlock tableLookupBlock(final Ruby runtime,
             final String catalog, final String schemapat,
             final String tablepat, final String[] types, final boolean downCase) {
+        final int TABLE_SCHEM = 2;
+        final int TABLE_NAME = 3;
+        final int TABLE_TYPE = 4;
         return new SQLBlock() {
             public Object call(Connection c) throws SQLException {
                 ResultSet rs = null;
@@ -1030,7 +1036,8 @@ public class RubyJdbcConnection extends RubyObject {
                     DatabaseMetaData metadata = c.getMetaData();
                     String clzName = metadata.getClass().getName().toLowerCase();
                     boolean isOracle = clzName.indexOf("oracle") != -1 || clzName.indexOf("oci") != -1;
-                    boolean isDerby = clzName.indexOf("derby") != 1;
+                    boolean isDerby = clzName.indexOf("derby") != -1;
+                    boolean isMssql = clzName.indexOf("sqlserver") != -1 || clzName.indexOf("tds") != -1;
 
                     String realschema = schemapat;
                     String realtablepat = tablepat;
@@ -1043,6 +1050,7 @@ public class RubyJdbcConnection extends RubyObject {
                     List arr = new ArrayList();
                     while (rs.next()) {
                         String name;
+                        String schema = rs.getString(TABLE_SCHEM) != null ? rs.getString(TABLE_SCHEM).toLowerCase() : null;
 
                         if (downCase) {
                             name = rs.getString(TABLE_NAME).toLowerCase();
@@ -1050,9 +1058,15 @@ public class RubyJdbcConnection extends RubyObject {
                             name = caseConvertIdentifierForRails(metadata, rs.getString(TABLE_NAME));
                         }
                         // Handle stupid Oracle 10g RecycleBin feature
-                        if (!isOracle || !name.startsWith("bin$")) {
-                            arr.add(RubyString.newUnicodeString(runtime, name));
+                        if (isOracle && name.startsWith("bin$")) {
+                            continue;
                         }
+                        // Under mssql, don't return system tables/views unless they're explicitly asked for.
+                        if (isMssql && realschema==null &&
+                            ("sys".equals(schema) || "information_schema".equals(schema))) {
+                            continue;
+                        }
+                        arr.add(RubyString.newUnicodeString(runtime, name));
                     }
                     return runtime.newArray(arr);
                 } finally {
@@ -1284,6 +1298,7 @@ public class RubyJdbcConnection extends RubyObject {
     private static byte[] CALL = new byte[]{'c', 'a', 'l', 'l'};
     private static byte[] INSERT = new byte[] {'i', 'n', 's', 'e', 'r', 't'};
     private static byte[] SELECT = new byte[] {'s', 'e', 'l', 'e', 'c', 't'};
+    private static byte[] WITH = new byte[] {'w', 'i', 't', 'h'};
     private static byte[] SHOW = new byte[] {'s', 'h', 'o', 'w'};
 
     private static boolean startsWithNoCaseCmp(ByteList bytelist, byte[] compare) {

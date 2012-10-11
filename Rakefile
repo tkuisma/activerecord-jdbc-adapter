@@ -6,16 +6,20 @@ require 'bundler'
 Bundler::GemHelper.install_tasks
 require 'bundler/setup'
 
-task :default => [:java_compile, :test]
+require 'appraisal'
+
+require File.expand_path('../test/helper', __FILE__)
+
+task :default => [:jar, :test]
 
 #ugh, bundler doesn't use tasks, so gotta hook up to both tasks.
-task :build => :java_compile
-task :install => :java_compile
+task :build => :jar
+task :install => :jar
 
 ADAPTERS = %w[derby h2 hsqldb mssql mysql postgresql sqlite3].map {|a| "activerecord-jdbc#{a}-adapter" }
 DRIVERS  = %w[derby h2 hsqldb jtds mysql postgres sqlite3].map {|a| "jdbc-#{a}" }
 
-def rake(args)
+def rake(*args)
   ruby "-S", "rake", *args
 end
 
@@ -44,16 +48,15 @@ end
   end
 end
 
-desc "Build all adapters"
+desc "Release all adapters"
 task "all:release" => ["release", *ADAPTERS.map { |f| "#{f}:release" }]
 
 desc "Install all adapters"
 task "all:install" => ["install", *ADAPTERS.map { |f| "#{f}:install" }]
 
-desc "Release all adapters"
+desc "Build all adapters"
 task "all:build"   => ["build", *ADAPTERS.map { |f| "#{f}:build" }]
 
 task :filelist do
   puts FileList['pkg/**/*'].inspect
 end
-

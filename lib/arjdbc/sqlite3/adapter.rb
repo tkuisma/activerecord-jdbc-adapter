@@ -120,7 +120,7 @@ module ::ArJdbc
     end
 
     def quote_column_name(name) #:nodoc:
-      %Q("#{name}")
+      %Q("#{name.to_s.gsub('"', '""')}")
     end
 
     def quote_string(str)
@@ -147,12 +147,12 @@ module ::ArJdbc
 
     def insert_sql(sql, name = nil, pk = nil, id_value = nil, sequence_name = nil, binds = []) #:nodoc:
       sql = substitute_binds(sql, binds)
-      @connection.execute_update(sql)
+      log(sql, name) { @connection.execute_update(sql) }
       id_value || last_insert_id
     end
 
     def last_insert_id
-      Integer(select_value("SELECT last_insert_rowid()"))
+      @connection.last_insert_row_id
     end
 
     def tables(name = nil) #:nodoc:
@@ -208,9 +208,12 @@ module ::ArJdbc
     end
 
     def table_structure(table_name)
-      structure = @connection.execute_query("PRAGMA table_info(#{quote_table_name(table_name)})")
-      raise ActiveRecord::StatementInvalid, "Could not find table '#{table_name}'" if structure.empty?
-      structure
+      sql = "PRAGMA table_info(#{quote_table_name(table_name)})"
+      log(sql, 'SCHEMA') { @connection.execute_query(sql) }
+    rescue ActiveRecord::JDBCError => error
+      e = ActiveRecord::StatementInvalid.new("Could not find table '#{table_name}'")
+      e.set_backtrace error.backtrace
+      raise e
     end
 
     def jdbc_columns(table_name, name = nil) #:nodoc:
@@ -283,6 +286,8 @@ module ::ArJdbc
           self.limit   = options[:limit] if options.include?(:limit)
           self.default = options[:default] if include_default
           self.null    = options[:null] if options.include?(:null)
+          self.precision = options[:precision] if options.include?(:precision)
+          self.scale   = options[:scale] if options.include?(:scale)
         end
       end
     end
