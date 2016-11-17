@@ -20,4 +20,5 @@ Gem::Specification.new do |s|
   s.rdoc_options = ["--main", "README.txt"]
   s.require_paths = ["lib"]
   s.rubyforge_project = %q{jruby-extras}
+  s.summary = "SAP ASE Adaptive Server Enterprise modifications by CGI Timo Kuisma"
 end
